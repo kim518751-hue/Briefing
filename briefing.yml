@@ -1,0 +1,38 @@
+name: Daily News Briefing
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # 매일 한국시간 오전 8시 (UTC 23:00 = KST 08:00)
+  workflow_dispatch:        # 수동 실행 버튼도 활성화
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run briefing
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          NAVER_EMAIL_PASSWORD: ${{ secrets.NAVER_EMAIL_PASSWORD }}
+          GITHUB_TOKEN_CUSTOM: ${{ secrets.GH_TOKEN }}
+        run: python briefing_actions.py
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./output
+          keep_files: true
