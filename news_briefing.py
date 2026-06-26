@@ -70,6 +70,27 @@ CATEGORIES = {
     ],
 }
 
+# 별도 페이지: 게임·피규어 (국내+해외)
+HOBBY_CATEGORIES = {
+    "게임": [
+        "게임 신작", "국내 게임 출시", "넥슨", "엔씨소프트", "넷마블", "크래프톤",
+        "스마일게이트", "펄어비스", "콘솔 게임", "닌텐도", "플레이스테이션", "스팀 게임",
+        "e스포츠", "게임 업계", "글로벌 게임 시장", "모바일게임 매출", "신작 RPG",
+        "게임 출시 일정",
+    ],
+    "피규어·컬렉터블": [
+        # 일본 애니 IP
+        "원피스 피규어", "주술회전 피규어", "드래곤볼 피규어", "드래곤볼 피겨라츠",
+        "귀멸의칼날 피규어", "반다이 피규어", "피규어 신제품 출시",
+        # 핫토이 12인치 / 커스텀
+        "핫토이 신제품", "핫토이 12인치", "핫토이 예약", "Hot Toys 피규어",
+        "12인치 피규어", "커스텀 피규어",
+        # 반다이 초합금 / 로봇
+        "반다이 초합금", "초합금혼", "소울오브초합금", "메탈빌드", "건담 메탈빌드",
+        "초합금 로봇", "프라모델 신제품",
+    ],
+}
+
 # 카테고리별 최대 노출 기사 수 (4개 카테고리 → 약 100건)
 MAX_PER_CATEGORY = 28
 # 특정 카테고리는 더 많이 노출 (요청: 국내은행 글로벌 폭넓게)
@@ -78,6 +99,8 @@ CATEGORY_CAPS = {"국내은행 글로벌·디지털": 40}
 DISPLAY_PER_QUERY = 30
 # 며칠 전까지의 기사를 포함할지 (1=전일자만, 2=어제+오늘 …)
 RECENT_DAYS = 2
+# 취미(게임·피규어)는 기사가 적어 기간을 더 넓게 (일주일)
+HOBBY_RECENT_DAYS = 7
 # 상단에 우선 노출할 선호 매체(도메인 또는 이름 일부). 글로벌이코노믹 등.
 PREFERRED_SOURCES = ["g-enews.com", "글로벌이코노믹", "연합뉴스", "yna.co.kr", "한국경제", "hankyung"]
 
@@ -147,18 +170,20 @@ def fetch_google_news_rss(query, n=15):
         return []
 
 
-def collect(target_day):
-    """최근 RECENT_DAYS일 기사만 카테고리별로 수집/중복제거.
+def collect(categories=None, recent_days=None):
+    """최근 recent_days일 기사만 카테고리별로 수집/중복제거.
     네이버 키가 있으면 네이버를, 없으면 자동으로 구글뉴스 RSS(키 불필요)를 사용."""
+    categories = categories or CATEGORIES
+    days = recent_days or RECENT_DAYS
     cid = os.environ.get("NAVER_CLIENT_ID")
     csec = os.environ.get("NAVER_CLIENT_SECRET")
     use_naver = bool(cid and csec)
-    cutoff = datetime.datetime.now(KST).date() - datetime.timedelta(days=RECENT_DAYS - 1)
+    cutoff = datetime.datetime.now(KST).date() - datetime.timedelta(days=days - 1)
     print("  뉴스 소스:", "네이버" if use_naver else "구글뉴스 RSS (API 키 불필요)")
 
     grouped = {}
     seen_titles = set()
-    for cat, keywords in CATEGORIES.items():
+    for cat, keywords in categories.items():
         bucket = []
         for kw in keywords:
             if use_naver:
@@ -286,7 +311,10 @@ def fallback_summary(grouped):
 # ---------------------------------------------------------------------------
 # 4) 모바일 반응형 HTML
 # ---------------------------------------------------------------------------
-def build_html(date_label, grouped, generated_at):
+def build_html(date_label, grouped, generated_at,
+               title="글로벌 디지털 데일리 브리핑",
+               eyebrow="WOORI BANK · GLOBAL DIGITAL TEAM",
+               other_url=None, other_label=None, recent_days=RECENT_DAYS):
     total = sum(len(v) for v in grouped.values())
     date_js = json.dumps(date_label.split(" (")[0], ensure_ascii=False)
     cat_icons = {
@@ -294,7 +322,13 @@ def build_html(date_label, grouped, generated_at):
         "국제정세·금융": "🌐",
         "국내기업 해외사업": "📦",
         "글로벌 핀테크": "💳",
+        "게임": "🎮",
+        "피규어·컬렉터블": "🧸",
     }
+    other_btn = (
+        f'<a class="otherpage" href="{html.escape(other_url)}">{html.escape(other_label)} →</a>'
+        if other_url and other_label else ""
+    )
 
     nav = "".join(
         f'<a class="chip" href="#cat{i}">{cat_icons.get(c, "•")} {html.escape(c)}'
@@ -361,6 +395,9 @@ def build_html(date_label, grouped, generated_at):
   header h1 {{ margin:2px 0 4px; font-size:19px; font-weight:800; }}
   header .date {{ font-size:13px; opacity:.92; }}
   header .stat {{ font-size:12px; opacity:.82; margin-top:6px; }}
+  .otherpage {{ display:inline-block; margin-top:10px; background:rgba(255,255,255,.18);
+    color:#fff; text-decoration:none; font-size:12.5px; font-weight:700;
+    padding:6px 12px; border-radius:16px; }}
   nav {{ display:flex; gap:8px; overflow-x:auto; padding:12px 16px;
     background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; }}
   .chip {{ flex:0 0 auto; display:flex; align-items:center; gap:6px;
@@ -426,10 +463,11 @@ def build_html(date_label, grouped, generated_at):
 </head>
 <body>
   <header>
-    <div class="eyebrow">WOORI BANK · GLOBAL DIGITAL TEAM</div>
-    <h1>글로벌 디지털 데일리 브리핑</h1>
-    <div class="date">📅 {html.escape(date_label)} 기준 · 최근 {RECENT_DAYS}일</div>
-    <div class="stat">총 {total}건 · 4개 카테고리</div>
+    <div class="eyebrow">{html.escape(eyebrow)}</div>
+    <h1>{html.escape(title)}</h1>
+    <div class="date">📅 {html.escape(date_label)} 기준 · 최근 {recent_days}일</div>
+    <div class="stat">총 {total}건 · {len(grouped)}개 카테고리</div>
+    {other_btn}
   </header>
   <nav>{nav}</nav>
   <main>
@@ -577,6 +615,27 @@ def demo_grouped():
     return grouped
 
 
+def demo_hobby():
+    samples = {
+        "게임": [
+            ("크래프톤 신작 콘솔 게임, 글로벌 출시일 공개", "신작의 정식 출시일과 플랫폼이 공개됐다.", ""),
+            ("닌텐도, 차세대 콘솔 판매 호조…국내 예약 폭주", "차세대 기기 초기 판매가 호조를 보인다.", ""),
+        ],
+        "피규어·컬렉터블": [
+            ("팝마트, 신규 IP 블라인드박스 국내 정식 출시", "POP MART가 신규 시리즈를 국내 출시했다.", ""),
+            ("반다이, 건프라 신제품 라인업 공개…예약 시작", "반다이가 신규 건프라 라인업을 공개했다.", ""),
+        ],
+    }
+    grouped = {}
+    for cat, rows in samples.items():
+        grouped[cat] = [{
+            "title": t, "summary": s, "implication": impl,
+            "link": "https://example.com", "source": "데모뉴스",
+            "pub": f"{10+i:02d}:00", "desc": s, "category": cat,
+        } for i, (t, s, impl) in enumerate(rows)]
+    return grouped
+
+
 # ---------------------------------------------------------------------------
 # 6) 로컬 .env 로더 (노트북 실행용 — 추가 패키지 불필요)
 # ---------------------------------------------------------------------------
@@ -671,24 +730,48 @@ def main():
     date_label = yesterday.strftime("%Y년 %m월 %d일 (%a)")
     generated_at = now.strftime("%Y-%m-%d %H:%M KST")
 
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    model = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+
+    def summarize(g):
+        if demo:
+            return g
+        if api_key:
+            return summarize_with_claude(g, api_key, model)
+        return fallback_summary(g)
+
+    # --- 업무 브리핑 (index.html) ---
     if demo:
         grouped = demo_grouped()
     else:
-        print(f"[{date_label}] 뉴스 수집 시작…")
-        grouped = collect(yesterday)   # 키 없으면 자동으로 구글뉴스 RSS 사용
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        model = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-        if api_key:
-            print("Claude 요약/시사점 생성…")
-            grouped = summarize_with_claude(grouped, api_key, model)
-        else:
-            print("[INFO] ANTHROPIC_API_KEY 없음 → 제목·링크 위주로 생성")
-            grouped = fallback_summary(grouped)
+        print(f"[{date_label}] 업무 브리핑 수집…")
+        grouped = collect(CATEGORIES)
+        print("업무 요약 생성…" if api_key else "[INFO] Claude 키 없음 → 제목·링크 위주")
+        grouped = summarize(grouped)
 
-    out = build_html(date_label, grouped, generated_at)
+    out = build_html(date_label, grouped, generated_at,
+                     title="글로벌 디지털 데일리 브리핑",
+                     eyebrow="WOORI BANK · GLOBAL DIGITAL TEAM",
+                     other_url="hobby.html", other_label="🎮 게임·피규어")
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(out)
     print(f"index.html 생성 완료 (총 {sum(len(v) for v in grouped.values())}건)")
+
+    # --- 게임·피규어 (hobby.html) ---
+    if demo:
+        hobby = demo_hobby()
+    else:
+        print("게임·피규어 수집…")
+        hobby = summarize(collect(HOBBY_CATEGORIES, recent_days=HOBBY_RECENT_DAYS))
+
+    hout = build_html(date_label, hobby, generated_at,
+                      title="게임 · 피규어 브리핑",
+                      eyebrow="MY HOBBY FEED · 국내 + 해외",
+                      other_url="index.html", other_label="🏦 업무 브리핑",
+                      recent_days=HOBBY_RECENT_DAYS)
+    with open("hobby.html", "w", encoding="utf-8") as f:
+        f.write(hout)
+    print(f"hobby.html 생성 완료 (총 {sum(len(v) for v in hobby.values())}건)")
 
     # 카카오톡 '나에게 보내기' (KAKAO_REST_KEY + KAKAO_REFRESH_TOKEN 있을 때만)
     kakao_key = os.environ.get("KAKAO_REST_KEY")
