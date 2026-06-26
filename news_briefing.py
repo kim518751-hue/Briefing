@@ -45,6 +45,9 @@ CATEGORIES = {
     "국제정세·금융": [
         "미국 금리 연준", "중국 경제 위안화", "일본 금융 엔화", "유럽 ECB 금리",
         "러시아 제재", "동남아 경제", "베트남 경제", "인도네시아 금융", "환율 시장",
+        "미중 갈등", "미중 무역", "관세 정책", "중동 정세", "우크라이나 전쟁",
+        "신흥국 경제", "아세안 경제", "원자재 가격", "국제유가", "글로벌 경제 전망",
+        "지정학 리스크", "공급망",
     ],
     "국내기업 해외사업": [
         "한국기업 해외진출", "삼성 해외사업", "현대차 해외", "K-금융 수출",
@@ -62,6 +65,8 @@ MAX_PER_CATEGORY = 28
 DISPLAY_PER_QUERY = 30
 # 며칠 전까지의 기사를 포함할지 (1=전일자만, 2=어제+오늘 …)
 RECENT_DAYS = 2
+# 상단에 우선 노출할 선호 매체(도메인 또는 이름 일부). 글로벌이코노믹 등.
+PREFERRED_SOURCES = ["g-enews.com", "글로벌이코노믹", "연합뉴스", "yna.co.kr", "한국경제", "hankyung"]
 
 # ---------------------------------------------------------------------------
 # 2) Naver 뉴스 수집
@@ -173,7 +178,10 @@ def collect(target_day):
                     "category": cat,
                 })
             time.sleep(0.1)
-        bucket.sort(key=lambda x: x["pub_sort"], reverse=True)
+        def _pref(x):
+            blob = (x.get("source") or "") + " " + (x.get("link") or "")
+            return any(p in blob for p in PREFERRED_SOURCES)
+        bucket.sort(key=lambda x: (_pref(x), x["pub_sort"]), reverse=True)
         grouped[cat] = bucket[:MAX_PER_CATEGORY]
         print(f"  {cat}: {len(grouped[cat])}건")
     return grouped
