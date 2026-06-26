@@ -56,10 +56,12 @@ CATEGORIES = {
     ],
 }
 
-# 카테고리별 최대 노출 기사 수
-MAX_PER_CATEGORY = 8
-# 키워드당 Naver 조회 개수
-DISPLAY_PER_QUERY = 15
+# 카테고리별 최대 노출 기사 수 (4개 카테고리 → 약 100건)
+MAX_PER_CATEGORY = 28
+# 키워드당 조회 개수
+DISPLAY_PER_QUERY = 30
+# 며칠 전까지의 기사를 포함할지 (1=전일자만, 2=어제+오늘 …)
+RECENT_DAYS = 2
 
 # ---------------------------------------------------------------------------
 # 2) Naver 뉴스 수집
@@ -128,11 +130,12 @@ def fetch_google_news_rss(query, n=15):
 
 
 def collect(target_day):
-    """target_day(KST)에 해당하는 기사만 카테고리별로 수집/중복제거.
+    """최근 RECENT_DAYS일 기사만 카테고리별로 수집/중복제거.
     네이버 키가 있으면 네이버를, 없으면 자동으로 구글뉴스 RSS(키 불필요)를 사용."""
     cid = os.environ.get("NAVER_CLIENT_ID")
     csec = os.environ.get("NAVER_CLIENT_SECRET")
     use_naver = bool(cid and csec)
+    cutoff = datetime.datetime.now(KST).date() - datetime.timedelta(days=RECENT_DAYS - 1)
     print("  뉴스 소스:", "네이버" if use_naver else "구글뉴스 RSS (API 키 불필요)")
 
     grouped = {}
@@ -153,7 +156,7 @@ def collect(target_day):
 
             for it in rows:
                 pub = parse_pubdate(it.get("pubDate", ""))
-                if pub is None or pub.date() != target_day:
+                if pub is None or pub.date() < cutoff:
                     continue
                 title = it.get("title", "")
                 norm = re.sub(r"\s+", "", title)[:40]
@@ -401,7 +404,7 @@ def build_html(date_label, grouped, generated_at):
   <header>
     <div class="eyebrow">WOORI BANK · GLOBAL DIGITAL TEAM</div>
     <h1>글로벌 디지털 데일리 브리핑</h1>
-    <div class="date">📅 {html.escape(date_label)} (전일자 기준)</div>
+    <div class="date">📅 {html.escape(date_label)} 기준 · 최근 {RECENT_DAYS}일</div>
     <div class="stat">총 {total}건 · 4개 카테고리</div>
   </header>
   <nav>{nav}</nav>
