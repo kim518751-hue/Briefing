@@ -108,6 +108,25 @@ DISPLAY_PER_QUERY = 30
 RECENT_DAYS = 2
 # 취미(게임·피규어)는 기사가 적어 기간을 더 넓게 (일주일)
 HOBBY_RECENT_DAYS = 7
+
+
+def briefing_window(now=None):
+    """업무 브리핑 대상 기간(시작일, 종료일) 반환.
+    - 평일(화~금): 전일자(어제) 하루
+    - 월요일: 지난 금·토·일 3일치 (주말 동안 못 본 기사)
+    - 토/일에 돌 경우엔 전일자 하루(어차피 월요일에 금~일 다시 모음)
+    """
+    now = now or datetime.datetime.now(KST)
+    today = now.date()
+    end = today - datetime.timedelta(days=1)          # 어제까지
+    if today.weekday() == 0:                            # 월요일
+        start = today - datetime.timedelta(days=3)     # 지난 금요일
+        label = "지난 금·토·일 기사"
+    else:
+        start = end                                    # 전일자만
+        label = "전일자(어제) 기사"
+    return start, end, label
+
 # 상단에 우선 노출할 선호 매체(도메인 또는 이름 일부). 글로벌이코노믹 등.
 PREFERRED_SOURCES = ["g-enews.com", "글로벌이코노믹", "연합뉴스", "yna.co.kr", "한국경제", "hankyung"]
 
@@ -177,16 +196,23 @@ def fetch_google_news_rss(query, n=15):
         return []
 
 
-def collect(categories=None, recent_days=None):
-    """최근 recent_days일 기사만 카테고리별로 수집/중복제거.
+def collect(categories=None, recent_days=None, window=None):
+    """기간 내 기사만 카테고리별로 수집/중복제거.
+    window=(start_date, end_date)가 주어지면 그 범위를, 아니면 최근 recent_days일을 사용.
     네이버 키가 있으면 네이버를, 없으면 자동으로 구글뉴스 RSS(키 불필요)를 사용."""
     categories = categories or CATEGORIES
-    days = recent_days or RECENT_DAYS
     cid = os.environ.get("NAVER_CLIENT_ID")
     csec = os.environ.get("NAVER_CLIENT_SECRET")
     use_naver = bool(cid and csec)
-    cutoff = datetime.datetime.now(KST).date() - datetime.timedelta(days=days - 1)
-    print("  뉴스 소스:", "네이버" if use_naver else "구글뉴스 RSS (API 키 불필요)")
+    today = datetime.datetime.now(KST).date()
+    if window:
+        start_d, end_d = window
+    else:
+        days = recent_days or RECENT_DAYS
+        start_d = today - datetime.timedelta(days=days - 1)
+        end_d = today
+    print("  뉴스 소스:", "네이버" if use_naver else "구글뉴스 RSS (API 키 불필요)",
+          f"| 기간 {start_d}~{end_d}")
 
     grouped = {}
     seen_titles = set()
@@ -206,7 +232,7 @@ def collect(categories=None, recent_days=None):
 
             for it in rows:
                 pub = parse_pubdate(it.get("pubDate", ""))
-                if pub is None or pub.date() < cutoff:
+                if pub is None or not (start_d <= pub.date() <= end_d):
                     continue
                 title = it.get("title", "")
                 norm = re.sub(r"\s+", "", title)[:40]
@@ -321,7 +347,7 @@ def fallback_summary(grouped):
 def build_html(date_label, grouped, generated_at,
                title="글로벌 디지털 데일리 브리핑",
                eyebrow="WOORI BANK · GLOBAL DIGITAL TEAM",
-               other_url=None, other_label=None, recent_days=RECENT_DAYS):
+               other_url=None, other_label=None, period_label="전일자 기사"):
     total = sum(len(v) for v in grouped.values())
     date_js = json.dumps(date_label.split(" (")[0], ensure_ascii=False)
     cat_icons = {
@@ -472,7 +498,7 @@ def build_html(date_label, grouped, generated_at,
   <header>
     <div class="eyebrow">{html.escape(eyebrow)}</div>
     <h1>{html.escape(title)}</h1>
-    <div class="date">📅 {html.escape(date_label)} 기준 · 최근 {recent_days}일</div>
+    <div class="date">📅 {html.escape(date_label)} · {html.escape(period_label)}</div>
     <div class="stat">총 {total}건 · {len(grouped)}개 카테고리</div>
     {other_btn}
   </header>
@@ -733,8 +759,12 @@ def main():
     load_dotenv()  # 로컬 실행 시 .env 자동 로드 (Actions에서는 무시됨)
     demo = "--demo" in sys.argv
     now = datetime.datetime.now(KST)
-    yesterday = (now - datetime.timedelta(days=1)).date()
-    date_label = yesterday.strftime("%Y년 %m월 %d일 (%a)")
+    start_d, end_d, period_label = briefing_window(now)
+    # 헤더 날짜: 단일일이면 그 날짜, 여러 날이면 범위 표기
+    if start_d == end_d:
+        date_label = end_d.strftime("%Y년 %m월 %d일 (%a)")
+    else:
+        date_label = f"{start_d.strftime('%m/%d')}~{end_d.strftime('%m/%d')}"
     generated_at = now.strftime("%Y-%m-%d %H:%M KST")
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -751,15 +781,16 @@ def main():
     if demo:
         grouped = demo_grouped()
     else:
-        print(f"[{date_label}] 업무 브리핑 수집…")
-        grouped = collect(CATEGORIES)
+        print(f"[{date_label}] 업무 브리핑 수집… ({period_label})")
+        grouped = collect(CATEGORIES, window=(start_d, end_d))
         print("업무 요약 생성…" if api_key else "[INFO] Claude 키 없음 → 제목·링크 위주")
         grouped = summarize(grouped)
 
     out = build_html(date_label, grouped, generated_at,
                      title="글로벌 디지털 데일리 브리핑",
                      eyebrow="WOORI BANK · GLOBAL DIGITAL TEAM",
-                     other_url="hobby.html", other_label="🎮 게임·피규어")
+                     other_url="hobby.html", other_label="🎮 게임·피규어",
+                     period_label=period_label)
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(out)
     print(f"index.html 생성 완료 (총 {sum(len(v) for v in grouped.values())}건)")
@@ -775,7 +806,7 @@ def main():
                       title="게임 · 피규어 브리핑",
                       eyebrow="MY HOBBY FEED · 국내 + 해외",
                       other_url="index.html", other_label="🏦 업무 브리핑",
-                      recent_days=HOBBY_RECENT_DAYS)
+                      period_label=f"최근 {HOBBY_RECENT_DAYS}일")
     with open("hobby.html", "w", encoding="utf-8") as f:
         f.write(hout)
     print(f"hobby.html 생성 완료 (총 {sum(len(v) for v in hobby.values())}건)")
